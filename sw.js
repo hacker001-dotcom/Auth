@@ -4,7 +4,7 @@
 // If you change any file in the app, change VERSION too. That's how
 // installed copies know to fetch the new files.
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const CACHE = `auth-${VERSION}`;
 const FILES = [
   './',
@@ -45,6 +45,8 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // The online vault always comes fresh from the network, never from here.
+  if (url.pathname.endsWith('/vault.json')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(

@@ -8,6 +8,10 @@ const dec = new TextDecoder();
 export const VAULT_FORMAT = 'auth-vault';
 export const VAULT_VERSION = 1;
 export const KDF_ITERATIONS = 600000; // PBKDF2-HMAC-SHA256, OWASP 2023 guidance
+// The online copy can be downloaded and attacked by anyone, so each guess is
+// made more than three times as expensive.
+export const ONLINE_ITERATIONS = 2000000;
+export const ONLINE_MIN_LENGTH = 16;
 export const MIN_ITERATIONS = 100000;
 export const MAX_ITERATIONS = 5000000;
 export const AUTO_LOCK_CHOICES = [30, 60, 120, 300];
@@ -293,6 +297,51 @@ export function emptyVaultData() {
   return { v: 1, accounts: [], settings: { autoLockSeconds: DEFAULT_AUTO_LOCK } };
 }
 
+// Removes repeated words and numbers (3+ characters) and squeezes spaces.
+function dropRepeats(pw) {
+  const tokens = pw.match(/[a-z]+|\d+|\s+|[^a-z\d\s]+/gi) || [];
+  const seen = new Set();
+  let out = '';
+  for (const t of tokens) {
+    if (/^\s+$/.test(t)) {
+      out += ' ';
+      continue;
+    }
+    const key = t.toLowerCase();
+    if (t.length >= 3 && seen.has(key)) continue;
+    seen.add(key);
+    out += t;
+  }
+  return out.replace(/\s+/g, ' ').trim() || pw;
+}
+
+// Rules for the online copy's password: anyone can download that file and
+// guess offline for as long as they like, so short or guessable won't do.
+export function checkOnlinePassword(password, confirm) {
+  if (typeof password !== 'string' || password.length < ONLINE_MIN_LENGTH) {
+    throw new InputError(
+      `Use at least ${ONLINE_MIN_LENGTH} characters for a file anyone can download. Six random words works well.`
+    );
+  }
+  if (password.length > 1024) throw new InputError('That password is too long.');
+  if (passwordStrength(password).score < 3) {
+    throw new InputError('That’s too easy to guess for a file anyone can download. Try six random words, not names or dates.');
+  }
+  if (confirm !== undefined && password !== confirm) {
+    throw new InputError('The two passwords don’t match.');
+  }
+}
+
+// A short fingerprint of the accounts, to tell whether the online copy still
+// matches. It's only ever stored inside the encrypted vault.
+export async function accountsFingerprint(accounts) {
+  const canonical = JSON.stringify(
+    accounts.map((a) => [a.issuer, a.label, a.secret, a.algorithm, a.digits, a.period])
+  );
+  const digest = new Uint8Array(await subtle.digest('SHA-256', enc.encode(canonical)));
+  return bytesToBase64(digest.subarray(0, 16));
+}
+
 export function checkNewPassword(password, confirm) {
   if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
     throw new InputError(`Use at least ${MIN_PASSWORD_LENGTH} characters.`);
@@ -307,8 +356,10 @@ export function checkNewPassword(password, confirm) {
 // real words, names and years, which attackers try first, so those patterns
 // are scored as what they are rather than by their raw length.
 export function passwordStrength(password) {
-  const pw = String(password || '');
-  if (!pw) return { score: 0, label: '' };
+  const raw = String(password || '');
+  if (!raw) return { score: 0, label: '' };
+  // "Sazzad2006!Sazzad" is no stronger than "Sazzad2006!": score repeats once.
+  const pw = raw.length <= 256 ? dropRepeats(raw) : raw;
   let pool = 0;
   if (/[a-z]/.test(pw)) pool += 26;
   if (/[A-Z]/.test(pw)) pool += 26;
@@ -327,7 +378,7 @@ export function passwordStrength(password) {
   } else if (words.length >= 2 && letterWords.length >= words.length - 1) {
     // Several words, maybe with a number: about 12 bits per word.
     bits = Math.min(bits, letterWords.length * 12 + extras);
-  } else if (/^[a-z]+[\s\-_.@#!$%&*]?\d{1,4}[^a-z0-9]?$/i.test(pw) || /^\d{1,4}[^a-z0-9]?[a-z]+[^a-z0-9]?$/i.test(pw)) {
+  } else if (/^[a-z]+[^a-z0-9]{0,3}\d{1,4}[^a-z0-9]{0,3}$/i.test(pw) || /^[^a-z0-9]{0,3}\d{1,4}[^a-z0-9]{0,3}[a-z]+[^a-z0-9]{0,3}$/i.test(pw)) {
     // A word or name with a year or short number, like "Dhaka@2026".
     bits = Math.min(bits, pw.replace(/[^a-z]/gi, '').length * 2.5 + extras);
   }
@@ -410,11 +461,19 @@ export function readVaultData(json) {
     };
   });
   const lock = d.settings && d.settings.autoLockSeconds;
-  return {
-    v: 1,
-    accounts,
-    settings: { autoLockSeconds: AUTO_LOCK_CHOICES.includes(lock) ? lock : DEFAULT_AUTO_LOCK },
-  };
+  const settings = { autoLockSeconds: AUTO_LOCK_CHOICES.includes(lock) ? lock : DEFAULT_AUTO_LOCK };
+  // What the last online copy contained, so the app can say when it's out of date.
+  const online = d.settings && d.settings.onlineVault;
+  if (
+    online &&
+    typeof online.savedAt === 'string' &&
+    online.savedAt.length <= 40 &&
+    typeof online.fingerprint === 'string' &&
+    /^[A-Za-z0-9+/=]{1,64}$/.test(online.fingerprint)
+  ) {
+    settings.onlineVault = { savedAt: online.savedAt, fingerprint: online.fingerprint };
+  }
+  return { v: 1, accounts, settings };
 }
 
 // Encrypts `data` with an already-derived key. A fresh IV every time.

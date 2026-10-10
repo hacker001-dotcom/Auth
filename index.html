@@ -8,7 +8,7 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#e3eae5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0c211b" media="(prefers-color-scheme: dark)">
-<meta name="description" content="Two-factor codes, locked with your password. Everything stays on this device.">
+<meta name="description" content="Two-factor codes, locked with your password.">
 <title>Auth</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png" type="image/png">
@@ -60,6 +60,7 @@
       <p class="note">If you forget this password, the codes on this device can&rsquo;t be recovered. Keep Instagram&rsquo;s backup codes somewhere safe.</p>
       <p class="form-error" role="alert"></p>
       <button class="btn btn--primary" type="submit">Create password</button>
+      <button class="btn btn--quiet btn--outline" type="button" id="btn-open-online">Not your device? Open your online vault</button>
       <button class="btn btn--quiet" type="button" id="btn-setup-restore">Restore from a backup file</button>
     </form>
   </section>
@@ -244,6 +245,12 @@
       </div>
     </section>
 
+    <section class="group" id="group-online">
+      <h3 class="group-title">Open from anywhere</h3>
+      <p id="online-status">Put a locked copy of your accounts online, so you can get a code on any phone with your link and a password.</p>
+      <button class="btn btn--quiet" type="button" id="btn-online">Make online vault file</button>
+    </section>
+
     <section class="group">
       <h3 class="group-title">This device</h3>
       <p id="storage-status">Checking storage&hellip;</p>
@@ -296,6 +303,64 @@
     <p class="note">Backups you already downloaded still open with the old password.</p>
     <p class="form-error" role="alert"></p>
     <button class="btn btn--primary" type="submit">Change password</button>
+  </form>
+</dialog>
+
+<!-- Make the online copy -->
+<dialog class="sheet sheet--small" id="dialog-online" aria-labelledby="online-title">
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <h2 id="online-title">Make an online vault</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <form class="panel" id="form-online" novalidate>
+      <p>This makes <strong>vault.json</strong>, a locked copy of your accounts. Put it on GitHub next to the app, and you can open your codes from any browser with your link and this password.</p>
+      <p class="warning">Anyone can download vault.json and keep guessing its password. Use six or more random words you know by heart. Never use your Instagram password, and don&rsquo;t save this one in a password manager.</p>
+      <label class="field">
+        <span class="field-label">Online vault password</span>
+        <input type="password" name="password" autocomplete="off" required aria-describedby="online-strength">
+      </label>
+      <p class="strength" id="online-strength" aria-live="polite"><span class="strength-bar" aria-hidden="true"><span></span></span><span class="strength-text"></span></p>
+      <label class="field">
+        <span class="field-label">Type it again</span>
+        <input type="password" name="confirm" autocomplete="off" required>
+      </label>
+      <p class="form-error" role="alert"></p>
+      <button class="btn btn--primary" type="submit">Download vault.json</button>
+    </form>
+    <div class="panel" id="online-done" hidden>
+      <p class="panel-note">vault.json is in your Downloads folder. Now put it online:</p>
+      <ol class="steps">
+        <li>Open your <strong>auth</strong> repository on GitHub.</li>
+        <li>Click <strong>Add file</strong>, then <strong>Upload files</strong>, and drop in vault.json.</li>
+        <li>Click <strong>Commit changes</strong>.</li>
+      </ol>
+      <p class="note">Do this again whenever you add, rename or delete an account. Auth will remind you.</p>
+      <button class="btn btn--primary" type="button" data-close>Done</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Turn an opened online vault into this device's own copy -->
+<dialog class="sheet sheet--small" id="dialog-keep" aria-labelledby="keep-title">
+  <form class="sheet-inner" id="form-keep" novalidate>
+    <header class="sheet-head">
+      <h2 id="keep-title">Keep on this device</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <p>Only do this on your own phone or computer. Choose a password for this device. You&rsquo;ll type it each time you open Auth here.</p>
+    <input class="sr-only" type="text" name="username" value="Auth vault" autocomplete="username" tabindex="-1" aria-hidden="true" readonly>
+    <label class="field">
+      <span class="field-label">Password for this device</span>
+      <input type="password" name="password" autocomplete="new-password" required aria-describedby="keep-strength">
+    </label>
+    <p class="strength" id="keep-strength" aria-live="polite"><span class="strength-bar" aria-hidden="true"><span></span></span><span class="strength-text"></span></p>
+    <label class="field">
+      <span class="field-label">Type it again</span>
+      <input type="password" name="confirm" autocomplete="new-password" required>
+    </label>
+    <p class="form-error" role="alert"></p>
+    <button class="btn btn--primary" type="submit">Save on this device</button>
   </form>
 </dialog>
 

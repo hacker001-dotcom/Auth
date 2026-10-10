@@ -96,16 +96,21 @@ body {
   overflow: hidden;
 }
 
+/* Visually hidden but still there for screen readers and password managers.
+   Every property is !important so input styles can't stretch it back out. */
 .sr-only {
   position: absolute !important;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }
 
 :focus-visible {
@@ -480,6 +485,7 @@ h3 {
 
 .banner {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 12px;
   padding: 12px 12px 12px 14px;
@@ -494,7 +500,8 @@ h3 {
 }
 
 .banner-text {
-  flex: 1;
+  flex: 1 1 15rem; /* a wide action button drops below the text on phones */
+  min-width: 0;
   padding-top: 2px;
 }
 
@@ -569,6 +576,11 @@ h3 {
   border-color: transparent;
   color: var(--ink-soft);
   min-height: 44px;
+}
+
+.gate .btn--outline {
+  border-color: var(--line);
+  color: var(--ink);
 }
 
 .btn--file {
@@ -930,6 +942,13 @@ dialog.sheet::backdrop {
   height: 232px;
   border-radius: 12px;
   background: #fff;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 1.4em;
+  display: grid;
+  gap: 6px;
 }
 
 .secret {

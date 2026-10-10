@@ -3,7 +3,7 @@
 
 import * as core from './core.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -109,6 +109,7 @@ const state = {
   timer: 0,
   installEvent: null,
   menuAccountId: null,
+  visiting: false, // the online vault, opened on a device that isn't yours
 };
 
 // ------------------------------------------------------------------ helpers
@@ -244,7 +245,7 @@ function playUnlock() {
 // ------------------------------------------------------------- boot
 
 async function boot() {
-  $('#version-line').textContent = `Auth version ${VERSION}. Your codes never leave this device.`;
+  $('#version-line').textContent = `Auth version ${VERSION}.`;
   for (const e of $$('.emblem')) e.append(buildLockBody(6));
   wire();
 
@@ -275,9 +276,21 @@ function unsupported(reason) {
 }
 
 function registerServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('Offline support is off:', err));
-  }
+  if (!('serviceWorker' in navigator)) return;
+  // An existing controller means this is an update, not the first install.
+  const updating = Boolean(navigator.serviceWorker.controller);
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!updating) return;
+    if (state.session) {
+      showBanner('update', 'Auth was updated. Reload to use the new version.', {
+        actionLabel: 'Reload',
+        onAction: () => location.reload(),
+      });
+    } else {
+      location.reload();
+    }
+  });
+  navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('Offline support is off:', err));
 }
 
 // ------------------------------------------------------------- setup
@@ -311,10 +324,17 @@ async function onSetup(e) {
   });
 }
 
-function updateStrength(input, out) {
+function updateStrength(input, out, mode = 'device') {
   const s = core.passwordStrength(input.value);
   out.dataset.score = String(s.score);
   const text = $('.strength-text', out);
+  if (mode === 'online') {
+    const tip = 'Six or more random words works well.';
+    if (!s.score) text.textContent = `This one has to be strong, because anyone can download the file. ${tip}`;
+    else if (s.score < 3 || input.value.length < core.ONLINE_MIN_LENGTH) text.textContent = `${s.label}. Not strong enough for a file anyone can download. ${tip}`;
+    else text.textContent = `${s.label}. Strong enough for the online vault.`;
+    return;
+  }
   const tip = 'Try five or more random words, not names or dates.';
   if (!s.score) text.textContent = `Longer is stronger. ${tip}`;
   else if (s.score < 3) text.textContent = `${s.label}. ${tip}`;
@@ -425,7 +445,9 @@ async function onForgot() {
 
 // ------------------------------------------------------------- unlocked
 
-async function enterUnlocked(session, data) {
+// `visiting` is the online vault opened on a device that isn't yours:
+// view only, nothing is saved here, and it locks sooner.
+async function enterUnlocked(session, data, { visiting = false } = {}) {
   const keys = new Map();
   for (const a of data.accounts) {
     keys.set(a.id, await core.importTotpKey(core.base32Decode(a.secret), a.algorithm));
@@ -433,22 +455,44 @@ async function enterUnlocked(session, data) {
   state.session = session;
   state.data = data;
   state.keys = keys;
+  state.visiting = visiting;
   state.lastActivity = Date.now();
+  setVisitingUi(visiting);
   showScreen('main');
   renderAccounts();
   startTicking();
   checkClock();
-  maybeOfferInstall();
+  if (visiting) {
+    showBanner(
+      'visiting',
+      'You’re viewing your online vault. Nothing is saved on this device, and it locks after a minute without use. Tap the lock when you’re done.',
+      state.record
+        ? { dismissible: false }
+        : { dismissible: false, actionLabel: 'Keep on this device', onAction: openKeepDialog }
+    );
+  } else {
+    maybeOfferInstall();
+  }
+}
+
+// Visiting mode hides everything that would change or reveal the vault.
+function setVisitingUi(visiting) {
+  $('#btn-add').hidden = visiting;
+  $('#btn-settings').hidden = visiting;
+  $('#btn-add-empty').hidden = visiting;
+  document.body.classList.toggle('visiting', visiting);
 }
 
 function lock() {
   if (!state.session) return;
+  const wasVisiting = state.visiting;
   stopTicking();
   stopScanner();
   closeDialogs();
   state.session = null;
   state.data = null;
   state.keys = new Map();
+  state.visiting = false;
   state.codes.clear();
   state.rows.clear();
   state.menuAccountId = null;
@@ -456,15 +500,21 @@ function lock() {
   $('#banners').replaceChildren();
   clearReveal();
   wipeForms();
+  setVisitingUi(false);
   clearTimeout(toastTimer);
   $('#toast').classList.remove('show');
-  showLocked();
+  if (state.record) {
+    showLocked();
+  } else {
+    showSetup();
+    if (wasVisiting) toast('Locked. Nothing from your vault was kept on this device.', 4000);
+  }
 }
 
 // Closed dialogs keep whatever was typed into them. Clear anything that
 // could hold a setup key or a password.
 function wipeForms() {
-  for (const id of ['#form-add', '#form-rename', '#form-change', '#form-password', '#form-confirm']) {
+  for (const id of ['#form-add', '#form-rename', '#form-change', '#form-password', '#form-confirm', '#form-online', '#form-keep']) {
     const f = $(id);
     f.reset();
     setError(f, '');
@@ -481,6 +531,8 @@ async function persist(record, session) {
 }
 
 async function save() {
+  // The online vault is view only: nothing it shows may be written here.
+  if (state.visiting) throw new Error('The online vault is view only.');
   const session = state.session;
   const record = await core.sealVault(session, state.data);
   await persist(record, session);
@@ -511,6 +563,27 @@ function renderAccounts() {
     state.rows.set(a.id, row);
   }
   tick(true);
+  checkOnlineCopy();
+}
+
+// Reminds you when the online vault no longer matches your accounts.
+async function checkOnlineCopy() {
+  const online = state.data && state.data.settings.onlineVault;
+  if (!online || state.visiting) {
+    removeBanner('online-stale');
+    return;
+  }
+  const session = state.session;
+  const fingerprint = await core.accountsFingerprint(state.data.accounts);
+  if (!stillOpen(session)) return;
+  if (fingerprint === online.fingerprint) {
+    removeBanner('online-stale');
+  } else if (!$('[data-banner="online-stale"]')) {
+    showBanner('online-stale', 'Your online vault doesn’t have your latest account changes. Make a new vault.json and upload it to GitHub.', {
+      actionLabel: 'Update',
+      onAction: openOnlineDialog,
+    });
+  }
 }
 
 function buildRow(a) {
@@ -518,11 +591,15 @@ function buildRow(a) {
   const codeButton = h('button', { class: 'code', type: 'button', 'aria-label': `${displayName(a)} code` }, lockbody);
   const fill = h('span', { class: 'timebar-fill' });
   const secs = h('span', { class: 'secs', 'aria-hidden': 'true' });
-  const more = h(
-    'button',
-    { class: 'icon-btn acct-more', type: 'button', 'aria-label': `Options for ${displayName(a)}`, title: 'Options' },
-    icon('i-more')
-  );
+  // No options menu when viewing the online vault: nothing to rename, delete
+  // or reveal on a device that isn't yours.
+  const more = state.visiting
+    ? null
+    : h(
+        'button',
+        { class: 'icon-btn acct-more', type: 'button', 'aria-label': `Options for ${displayName(a)}`, title: 'Options' },
+        icon('i-more')
+      );
   const li = h(
     'li',
     { class: 'acct' },
@@ -545,7 +622,7 @@ function buildRow(a) {
     )
   );
   codeButton.addEventListener('click', () => copyCode(a.id));
-  more.addEventListener('click', () => openAccountSheet(a.id));
+  if (more) more.addEventListener('click', () => openAccountSheet(a.id));
   return { li, lockbody, fill, secs, codeButton };
 }
 
@@ -560,7 +637,9 @@ function stopTicking() {
 }
 
 function idleLimitPassed(now = Date.now()) {
-  return now - state.lastActivity > state.data.settings.autoLockSeconds * 1000;
+  // On someone else's device, never stay open longer than a minute.
+  const seconds = state.visiting ? Math.min(60, state.data.settings.autoLockSeconds) : state.data.settings.autoLockSeconds;
+  return now - state.lastActivity > seconds * 1000;
 }
 
 async function tick(initial) {
@@ -612,30 +691,28 @@ async function copyCode(id) {
 
 // --------------------------------------------------------------- banners
 
-function showBanner(id, text, { warn = false, actionLabel, onAction, onDismiss } = {}) {
+function showBanner(id, text, { warn = false, actionLabel, onAction, onDismiss, dismissible = true } = {}) {
   removeBanner(id);
-  const dismiss = h(
-    'button',
-    { class: 'icon-btn', type: 'button', 'aria-label': 'Dismiss' },
-    icon('i-close')
-  );
   const actions = h('div', { class: 'banner-actions' });
   if (actionLabel) {
     const b = h('button', { class: 'btn btn--primary', type: 'button', text: actionLabel });
     b.addEventListener('click', onAction);
     actions.append(b);
   }
-  actions.append(dismiss);
   const el = h(
     'div',
     { class: `banner${warn ? ' banner--warn' : ''}`, 'data-banner': id, role: warn ? 'alert' : null },
     h('p', { class: 'banner-text', text }),
     actions
   );
-  dismiss.addEventListener('click', () => {
-    el.remove();
-    if (onDismiss) onDismiss();
-  });
+  if (dismissible) {
+    const dismiss = h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Dismiss' }, icon('i-close'));
+    dismiss.addEventListener('click', () => {
+      el.remove();
+      if (onDismiss) onDismiss();
+    });
+    actions.append(dismiss);
+  }
   $('#banners').append(el);
 }
 
@@ -1125,15 +1202,20 @@ function clearReveal() {
 // ------------------------------------------------------------ dialogs
 
 // Asks for the password of `record` and returns what it opens, or null.
-function askPassword(record, reason, submitLabel = 'Continue') {
+// `shared` is for someone else's device: don't invite their browser to
+// remember the password.
+function askPassword(record, reason, submitLabel = 'Continue', { shared = false, title = 'Enter your password', busyLabel = 'Checking…' } = {}) {
   return new Promise((resolve) => {
     const d = $('#dialog-password');
     const f = $('#form-password');
     const button = $('#password-submit');
     f.reset();
     setError(f, '');
+    $('#password-title').textContent = title;
     $('#password-reason').textContent = reason;
     button.textContent = submitLabel;
+    f.password.autocomplete = shared ? 'off' : 'current-password';
+    f.username.disabled = shared;
     let result = null;
     const onSubmit = async (e) => {
       e.preventDefault();
@@ -1142,7 +1224,7 @@ function askPassword(record, reason, submitLabel = 'Continue') {
         setError(f, 'Enter the password.');
         return;
       }
-      await busy(button, 'Checking…', async () => {
+      await busy(button, busyLabel, async () => {
         try {
           result = await core.openVault(record, f.password.value);
           d.close();
@@ -1164,6 +1246,8 @@ function askPassword(record, reason, submitLabel = 'Continue') {
       () => {
         f.removeEventListener('submit', onSubmit);
         f.reset();
+        f.password.autocomplete = 'current-password';
+        f.username.disabled = false;
         resolve(result);
       },
       { once: true }
@@ -1216,8 +1300,162 @@ async function openSettings() {
   for (const r of $$('input[name=autolock]')) r.checked = Number(r.value) === state.data.settings.autoLockSeconds;
   $('#group-install').hidden = !state.installEvent;
   $('#storage-status').textContent = 'Checking storage…';
+  const online = state.data.settings.onlineVault;
+  if (online) {
+    const made = new Date(online.savedAt);
+    const when = Number.isNaN(made.getTime())
+      ? 'earlier'
+      : `on ${made.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+    const current = (await core.accountsFingerprint(state.data.accounts)) === online.fingerprint;
+    $('#online-status').textContent = current
+      ? `You made your online vault ${when}, and it has all your accounts.`
+      : `You made your online vault ${when}, but it doesn’t have your latest account changes. Make a new one and upload it.`;
+    $('#btn-online').textContent = 'Make a new vault.json';
+  } else {
+    $('#online-status').textContent =
+      'Put a locked copy of your accounts online, so you can get a code on any phone with your link and a password.';
+    $('#btn-online').textContent = 'Make online vault file';
+  }
   $('#sheet-settings').showModal();
   $('#storage-status').textContent = await describeStorage();
+}
+
+// ------------------------------------------------------------ online vault
+
+function openOnlineDialog() {
+  const f = $('#form-online');
+  f.reset();
+  setError(f, '');
+  updateStrength(f.password, $('#online-strength'), 'online');
+  f.hidden = false;
+  $('#online-done').hidden = true;
+  $('#dialog-online').showModal();
+  f.password.focus();
+}
+
+// Makes vault.json: the same accounts, locked with a separate, stronger
+// password and a slower key derivation, for a file anyone can download.
+async function onMakeOnline(e) {
+  e.preventDefault();
+  const f = e.currentTarget;
+  setError(f, '');
+  try {
+    core.checkOnlinePassword(f.password.value, f.confirm.value);
+  } catch (err) {
+    setError(f, err.message);
+    return;
+  }
+  await busy($('[type=submit]', f), 'Locking it up…', async () => {
+    const session = state.session;
+    // Both copies record what the online one contains, so either can tell
+    // later whether it has fallen behind.
+    const info = { savedAt: new Date().toISOString(), fingerprint: await core.accountsFingerprint(state.data.accounts) };
+    const data = { ...state.data, settings: { ...state.data.settings, onlineVault: info } };
+    const { session: online, record } = await core.createVault(f.password.value, data, core.ONLINE_ITERATIONS);
+    if (!stillOpen(session)) return;
+    await core.readWithSession(record, online); // it must open before anyone relies on it
+    downloadJson(record, 'vault.json');
+    state.data.settings.onlineVault = info;
+    try {
+      await save();
+    } catch (err) {
+      console.error(err); // only the reminder is lost; the file itself is fine
+    }
+    if (!stillOpen(session)) return;
+    f.reset();
+    f.hidden = true;
+    $('#online-done').hidden = false;
+    $('[data-close]', $('#online-done')).focus();
+    removeBanner('online-stale');
+  });
+}
+
+// On any device: fetch vault.json from the site and open it, view only.
+async function openOnlineVault() {
+  let record = null;
+  await busy($('#btn-open-online'), 'Looking for it…', async () => {
+    let res;
+    try {
+      res = await fetch('./vault.json', { cache: 'no-store' });
+    } catch {
+      toast('Couldn’t reach your online vault. Check the internet connection and try again.', 5000);
+      return;
+    }
+    if (res.status === 404) {
+      toast('There’s no online vault here yet. Make one in Settings on your PC, then upload vault.json to GitHub.', 6000);
+      return;
+    }
+    if (!res.ok) {
+      toast(`Couldn’t load your online vault (error ${res.status}). Try again in a minute.`, 5000);
+      return;
+    }
+    try {
+      const candidate = await res.json();
+      core.checkRecord(candidate);
+      record = candidate;
+    } catch (err) {
+      toast(
+        err && err.code === 'unsupported'
+          ? 'Your online vault was made by a newer version of Auth.'
+          : 'The online vault file is damaged. Make a new one on your PC and upload it again.',
+        6000
+      );
+    }
+  });
+  if (!record) return;
+  const opened = await askPassword(
+    record,
+    'Type your online vault password. If this phone offers to save it, tap Never.',
+    'Open',
+    { shared: true, title: 'Open your online vault', busyLabel: 'Opening, this takes a few seconds…' }
+  );
+  if (!opened || state.session) return;
+  await enterUnlocked(opened.session, opened.data, { visiting: true });
+}
+
+function openKeepDialog() {
+  const f = $('#form-keep');
+  f.reset();
+  setError(f, '');
+  updateStrength(f.password, $('#keep-strength'));
+  $('#dialog-keep').showModal();
+  f.password.focus();
+}
+
+// Turns the opened online vault into this device's own copy (for a new phone).
+async function onKeep(e) {
+  e.preventDefault();
+  const f = e.currentTarget;
+  setError(f, '');
+  if (!state.visiting || state.record) {
+    setError(f, 'Auth is already set up on this device.');
+    return;
+  }
+  try {
+    core.checkNewPassword(f.password.value, f.confirm.value);
+  } catch (err) {
+    setError(f, err.message);
+    return;
+  }
+  await busy($('[type=submit]', f), 'Saving…', async () => {
+    const visit = state.session;
+    const { session, record } = await core.createVault(f.password.value, state.data);
+    if (!stillOpen(visit)) return;
+    await persist(record, session);
+    if (!stillOpen(visit)) {
+      // Saved, but Auth locked in the meantime: show the normal lock screen.
+      if (document.body.dataset.screen === 'setup') showLocked();
+      return;
+    }
+    state.session = session;
+    state.visiting = false;
+    setVisitingUi(false);
+    removeBanner('visiting');
+    $('#dialog-keep').close();
+    renderAccounts();
+    requestPersistence();
+    toast('Saved on this device. Next time, unlock it with this password.', 5000);
+  });
 }
 
 async function onAutoLockChange(e) {
@@ -1291,16 +1529,18 @@ async function onChangePassword(e) {
   });
 }
 
-function downloadBackup() {
-  const json = JSON.stringify(state.record, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
+function downloadJson(value, filename) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  const date = new Date().toISOString().slice(0, 10);
-  const a = h('a', { href: url, download: `auth-backup-${date}.json` });
+  const a = h('a', { href: url, download: filename });
   document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function downloadBackup() {
+  downloadJson(state.record, `auth-backup-${new Date().toISOString().slice(0, 10)}.json`);
   toast('Backup downloaded. It opens with your current password.', 4000);
 }
 
@@ -1414,6 +1654,7 @@ function wire() {
   $('#form-setup').addEventListener('submit', onSetup);
   $('#form-setup').password.addEventListener('input', (e) => updateStrength(e.target, $('#setup-strength')));
   $('#btn-setup-restore').addEventListener('click', () => chooseBackup('setup'));
+  $('#btn-open-online').addEventListener('click', openOnlineVault);
 
   $('#form-unlock').addEventListener('submit', onUnlock);
   $('#btn-forgot').addEventListener('click', onForgot);
@@ -1468,6 +1709,14 @@ function wire() {
   $('#btn-restore').addEventListener('click', () => chooseBackup('merge'));
   $('#file-backup').addEventListener('change', onBackupFile);
   $('#btn-erase').addEventListener('click', onErase);
+  $('#btn-online').addEventListener('click', () => {
+    $('#sheet-settings').close();
+    openOnlineDialog();
+  });
+  $('#form-online').addEventListener('submit', onMakeOnline);
+  $('#form-online').password.addEventListener('input', (e) => updateStrength(e.target, $('#online-strength'), 'online'));
+  $('#form-keep').addEventListener('submit', onKeep);
+  $('#form-keep').password.addEventListener('input', (e) => updateStrength(e.target, $('#keep-strength')));
   $('#btn-install').addEventListener('click', promptInstall);
 
   // Close buttons, and taps on the dimmed area around a sheet.
