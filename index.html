@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#e3eae5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c211b" media="(prefers-color-scheme: dark)">
+<meta name="description" content="Two-factor codes, locked with your password. Everything stays on this device.">
+<title>Auth</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="preload" href="barlow-sc-600.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.6" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></symbol>
+</svg>
+
+<main id="app">
+
+  <!-- Shown until the script decides what to do -->
+  <section class="screen screen--center" id="screen-loading" aria-busy="true">
+    <p class="muted">Opening Auth</p>
+  </section>
+
+  <!-- The browser can't run Auth -->
+  <section class="screen screen--center" id="screen-unsupported" hidden>
+    <div class="gate">
+      <h1 class="gate-title">Auth can&rsquo;t run here</h1>
+      <p id="unsupported-reason">This browser is missing something Auth needs to keep your codes safe. Open Auth in Chrome on your phone or computer.</p>
+    </div>
+  </section>
+
+  <!-- First run: choose a password -->
+  <section class="screen screen--center" id="screen-setup" hidden>
+    <form class="gate" id="form-setup" novalidate>
+      <div class="emblem" aria-hidden="true"></div>
+      <h1 class="gate-title">Set up Auth</h1>
+      <p>Choose a password. It encrypts your codes on this device, and you&rsquo;ll type it each time you open Auth.</p>
+      <input class="sr-only" type="text" name="username" value="Auth vault" autocomplete="username" tabindex="-1" aria-hidden="true" readonly>
+      <label class="field">
+        <span class="field-label">Password</span>
+        <input type="password" name="password" autocomplete="new-password" required minlength="8" aria-describedby="setup-strength">
+      </label>
+      <p class="strength" id="setup-strength" aria-live="polite"><span class="strength-bar" aria-hidden="true"><span></span></span><span class="strength-text">Longer is stronger. Try five or more random words, not names or dates.</span></p>
+      <label class="field">
+        <span class="field-label">Type it again</span>
+        <input type="password" name="confirm" autocomplete="new-password" required>
+      </label>
+      <p class="note">If you forget this password, the codes on this device can&rsquo;t be recovered. Keep Instagram&rsquo;s backup codes somewhere safe.</p>
+      <p class="form-error" role="alert"></p>
+      <button class="btn btn--primary" type="submit">Create password</button>
+      <button class="btn btn--quiet" type="button" id="btn-setup-restore">Restore from a backup file</button>
+    </form>
+  </section>
+
+  <!-- Locked -->
+  <section class="screen screen--center" id="screen-locked" hidden>
+    <form class="gate" id="form-unlock" novalidate>
+      <div class="emblem" aria-hidden="true"></div>
+      <h1 class="gate-title">Auth is locked</h1>
+      <input class="sr-only" type="text" name="username" value="Auth vault" autocomplete="username" tabindex="-1" aria-hidden="true" readonly>
+      <label class="field">
+        <span class="field-label">Password</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <p class="form-error" role="alert"></p>
+      <button class="btn btn--primary" type="submit">Unlock</button>
+      <button class="btn btn--quiet" type="button" id="btn-forgot">Forgot your password?</button>
+    </form>
+  </section>
+
+  <!-- Unlocked -->
+  <section class="screen" id="screen-main" hidden>
+    <header class="bar">
+      <h1 class="brand">Auth</h1>
+      <div class="bar-actions">
+        <button class="icon-btn" type="button" id="btn-add" aria-label="Add account" title="Add account"><svg><use href="#i-plus"/></svg></button>
+        <button class="icon-btn" type="button" id="btn-settings" aria-label="Settings" title="Settings"><svg><use href="#i-gear"/></svg></button>
+        <button class="icon-btn" type="button" id="btn-lock" aria-label="Lock now" title="Lock now"><svg><use href="#i-lock"/></svg></button>
+      </div>
+    </header>
+
+    <div class="banners" id="banners"></div>
+
+    <ul class="accounts" id="accounts"></ul>
+    <p class="hint" id="copy-hint" hidden>Tap a code to copy it.</p>
+
+    <div class="empty" id="empty" hidden>
+      <div class="emblem" aria-hidden="true"></div>
+      <h2 class="empty-title">No accounts yet</h2>
+      <p>When you turn on two-factor in Instagram, it shows a QR code and a setup key. Add either one here.</p>
+      <button class="btn btn--primary" type="button" id="btn-add-empty">Add account</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- Add account -->
+<dialog class="sheet" id="sheet-add" aria-labelledby="add-title">
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <h2 id="add-title">Add account</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div class="tabs" role="tablist" aria-label="How to add">
+      <button type="button" role="tab" id="tab-key" aria-controls="panel-key" aria-selected="true">Setup key</button>
+      <button type="button" role="tab" id="tab-scan" aria-controls="panel-scan" aria-selected="false" tabindex="-1">Scan QR code</button>
+    </div>
+
+    <div id="panel-key" role="tabpanel" aria-labelledby="tab-key">
+    <form class="panel" id="form-add" novalidate>
+      <p class="panel-note" id="add-from-qr" hidden>Got it from the QR code. Check the details, then add the account.</p>
+      <label class="field">
+        <span class="field-label">Service</span>
+        <input name="issuer" value="Instagram" maxlength="64" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label">Your username <span class="optional">(optional)</span></span>
+        <input name="label" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false">
+      </label>
+      <label class="field">
+        <span class="field-label">Setup key</span>
+        <textarea name="secret" rows="2" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="ABCD EFGH IJKL MNOP QRST UVWX YZ23 4567"></textarea>
+      </label>
+      <p class="field-help">Spaces don&rsquo;t matter. On a computer you can also paste a screenshot of the QR code here.</p>
+      <details class="advanced">
+        <summary>Advanced settings</summary>
+        <div class="advanced-grid">
+          <label class="field">
+            <span class="field-label">Algorithm</span>
+            <select name="algorithm"><option>SHA1</option><option>SHA256</option><option>SHA512</option></select>
+          </label>
+          <label class="field">
+            <span class="field-label">Digits</span>
+            <select name="digits"><option>6</option><option>7</option><option>8</option></select>
+          </label>
+          <label class="field">
+            <span class="field-label">Seconds</span>
+            <input name="period" type="number" inputmode="numeric" min="10" max="300" value="30">
+          </label>
+        </div>
+        <p class="field-help">Leave these alone for Instagram.</p>
+      </details>
+      <p class="form-error" role="alert"></p>
+      <button class="btn btn--primary" type="submit">Add account</button>
+    </form>
+    </div>
+
+    <div class="panel" id="panel-scan" role="tabpanel" aria-labelledby="tab-scan" hidden>
+      <div class="scanner" id="scanner">
+        <video id="scanner-video" playsinline muted></video>
+        <div class="scanner-frame" aria-hidden="true"></div>
+      </div>
+      <p class="scanner-status" id="scanner-status" aria-live="polite">Point your camera at the QR code.</p>
+      <label class="btn btn--quiet btn--file">
+        Use a picture of the QR code
+        <input type="file" id="scan-file" accept="image/*" class="sr-only">
+      </label>
+    </div>
+  </div>
+</dialog>
+
+<!-- Account options -->
+<dialog class="sheet" id="sheet-account" aria-labelledby="account-title">
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <h2 id="account-title">Account</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div class="menu" id="account-menu">
+      <button class="menu-item" type="button" data-action="rename">Rename</button>
+      <button class="menu-item" type="button" data-action="reveal">Show setup key and QR code</button>
+      <button class="menu-item menu-item--danger" type="button" data-action="delete">Delete</button>
+    </div>
+    <form class="panel" id="form-rename" hidden novalidate>
+      <label class="field">
+        <span class="field-label">Service</span>
+        <input name="issuer" maxlength="64" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label">Your username <span class="optional">(optional)</span></span>
+        <input name="label" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false">
+      </label>
+      <p class="form-error" role="alert"></p>
+      <button class="btn btn--primary" type="submit">Save name</button>
+    </form>
+    <div class="panel reveal" id="panel-reveal" hidden>
+      <p class="warning">Anyone who sees this can make your codes. Use it to add this account to another device, then close it.</p>
+      <canvas class="qr" id="reveal-qr" width="232" height="232" role="img" aria-label="QR code for this account"></canvas>
+      <p class="field-label">Setup key</p>
+      <p class="secret" id="reveal-key"></p>
+      <button class="btn btn--quiet" type="button" id="btn-copy-key">Copy setup key</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Settings -->
+<dialog class="sheet" id="sheet-settings" aria-labelledby="settings-title">
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+
+    <section class="group" id="group-install" hidden>
+      <h3 class="group-title">Install</h3>
+      <p>Installing puts Auth on your home screen, makes it work offline, and helps Chrome keep its data.</p>
+      <button class="btn btn--primary" type="button" id="btn-install">Install Auth</button>
+    </section>
+
+    <fieldset class="group">
+      <legend class="group-title">Lock automatically after</legend>
+      <div class="choices" id="autolock-choices">
+        <label class="choice"><input type="radio" name="autolock" value="30"><span>30 seconds</span></label>
+        <label class="choice"><input type="radio" name="autolock" value="60"><span>1 minute</span></label>
+        <label class="choice"><input type="radio" name="autolock" value="120"><span>2 minutes</span></label>
+        <label class="choice"><input type="radio" name="autolock" value="300"><span>5 minutes</span></label>
+      </div>
+      <p class="field-help">Counts from the last time you touched the app, including while it&rsquo;s in the background.</p>
+    </fieldset>
+
+    <section class="group">
+      <h3 class="group-title">Password</h3>
+      <button class="btn btn--quiet" type="button" id="btn-change-password">Change password</button>
+    </section>
+
+    <section class="group">
+      <h3 class="group-title">Backup</h3>
+      <p>The backup file is locked with your current password. Keep it somewhere other than this device.</p>
+      <div class="btn-row">
+        <button class="btn btn--quiet" type="button" id="btn-backup">Download backup</button>
+        <button class="btn btn--quiet" type="button" id="btn-restore">Restore a backup</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3 class="group-title">This device</h3>
+      <p id="storage-status">Checking storage&hellip;</p>
+      <button class="btn btn--danger" type="button" id="btn-erase">Erase Auth from this device</button>
+    </section>
+
+    <p class="fine" id="version-line"></p>
+  </div>
+</dialog>
+
+<!-- Ask for the password again -->
+<dialog class="sheet sheet--small" id="dialog-password" aria-labelledby="password-title">
+  <form class="sheet-inner" id="form-password" novalidate>
+    <header class="sheet-head">
+      <h2 id="password-title">Enter your password</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <p id="password-reason"></p>
+    <input class="sr-only" type="text" name="username" value="Auth vault" autocomplete="username" tabindex="-1" aria-hidden="true" readonly>
+    <label class="field">
+      <span class="field-label">Password</span>
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <p class="form-error" role="alert"></p>
+    <button class="btn btn--primary" type="submit" id="password-submit">Continue</button>
+  </form>
+</dialog>
+
+<!-- Change password -->
+<dialog class="sheet sheet--small" id="dialog-change" aria-labelledby="change-title">
+  <form class="sheet-inner" id="form-change" novalidate>
+    <header class="sheet-head">
+      <h2 id="change-title">Change password</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <input class="sr-only" type="text" name="username" value="Auth vault" autocomplete="username" tabindex="-1" aria-hidden="true" readonly>
+    <label class="field">
+      <span class="field-label">Current password</span>
+      <input type="password" name="current" autocomplete="current-password" required>
+    </label>
+    <label class="field">
+      <span class="field-label">New password</span>
+      <input type="password" name="password" autocomplete="new-password" required aria-describedby="change-strength">
+    </label>
+    <p class="strength" id="change-strength" aria-live="polite"><span class="strength-bar" aria-hidden="true"><span></span></span><span class="strength-text"></span></p>
+    <label class="field">
+      <span class="field-label">Type the new one again</span>
+      <input type="password" name="confirm" autocomplete="new-password" required>
+    </label>
+    <p class="note">Backups you already downloaded still open with the old password.</p>
+    <p class="form-error" role="alert"></p>
+    <button class="btn btn--primary" type="submit">Change password</button>
+  </form>
+</dialog>
+
+<!-- Confirm something that can't be undone -->
+<dialog class="sheet sheet--small" id="dialog-confirm" aria-labelledby="confirm-title">
+  <form class="sheet-inner" id="form-confirm" novalidate>
+    <header class="sheet-head">
+      <h2 id="confirm-title"></h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <p id="confirm-body"></p>
+    <label class="field" id="confirm-typed" hidden>
+      <span class="field-label" id="confirm-typed-label"></span>
+      <input name="typed" autocomplete="off" autocapitalize="none" spellcheck="false">
+    </label>
+    <p class="form-error" role="alert"></p>
+    <div class="btn-row">
+      <button class="btn btn--quiet" type="button" data-close>Cancel</button>
+      <button class="btn btn--danger-solid" type="submit" id="confirm-ok"></button>
+    </div>
+  </form>
+</dialog>
+
+<input type="file" id="file-backup" accept=".json,application/json" class="sr-only" tabindex="-1" aria-hidden="true">
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
