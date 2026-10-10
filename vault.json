@@ -1,0 +1,16 @@
+{
+  "format": "auth-vault",
+  "version": 1,
+  "kdf": {
+    "name": "PBKDF2",
+    "hash": "SHA-256",
+    "iterations": 2000000,
+    "salt": "E5MerkTvJXrUZ0vAG+0PAA=="
+  },
+  "cipher": {
+    "name": "AES-GCM",
+    "iv": "Hy4EIfCFnBAcogdj"
+  },
+  "ciphertext": "vpx5WoJFNsLR/MS4nuq1GSrUBZUd891+3YUKQaxbTSCtSnSsmQl9QjS3G+lxNwDbymbs4VICIxE7Kwc80edFSZ9Vvess5grJ1AGVB0baFP7LCwRbctOjcjW0p8v8Wi+XUFcVEazH3384SbQZ0WDHWsXiYDFjCkmV2OeQC1IPuNyTboNY9DpKdKW7y51gCtZBD8QP6F0WMevqdrQUQVq3X8Wzi1MlNnCOSmrl7QJIBMyYZk37SzGjycID6ayMB8QSTgalQve/9OVxHvBqgja4Q6R/LdsW2f/Ldv1/bgGmDkJE953HQ/1gtxPmNtIYoQg+NOf+C2CPyzeWsSgVkiTYpGvGGPe/9WMEpiKqggV03qvKUwu/PDjLBj1Efr/sumjQu6TMzkB71GSmOD8GCnJI5g2uSTq/tycrBPoHE35s7RvB2NOZzequT7U3Qh8phXcPImNprJdxIvnomy4Vcdl5LpD0zg5+7HJo/w1qrBNu4Zp/ahfGvnD3Mfg=",
+  "updatedAt": "2026-10-10T17:28:32.873Z"
+}
